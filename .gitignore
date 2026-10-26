@@ -1,0 +1,9 @@
+# your Tapo password and its runtime copy
+secrets/*
+!secrets/README.md
+
+# downloaded videos
+recordings/
+
+__pycache__/
+*.pyc

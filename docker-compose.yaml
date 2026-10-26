@@ -1,0 +1,54 @@
+name: tapo-nas-archiver
+
+# Copies recordings from a Tapo hub (or a camera with microSD card) to ./recordings.
+# No port is published; the container only connects out to the Tapo device in your LAN (TCP 443 and 8800).
+# Put the password of your Tapo account into ./secrets/tapo_password before the first start.
+# Test:  docker compose run --rm archiver python /app/tapo_archiver.py test
+services:
+  # Runs once on every start: makes the code readable, hands ./recordings to the service user (uid 10001)
+  # and copies the password so that only the service user can read it.
+  fixperms:
+    image: busybox:1.37.0
+    user: "0:0"
+    restart: "no"
+    network_mode: none
+    command:
+      - sh
+      - -ec
+      - |
+        chmod -R a+rX /proj/app
+        mkdir -p /proj/recordings /proj/secrets/run
+        chown -R 10001:10001 /proj/recordings
+        rm -f /proj/secrets/run/*
+        if [ -f /proj/secrets/tapo_password ]; then cp -f /proj/secrets/tapo_password /proj/secrets/run/; chmod 0600 /proj/secrets/tapo_password; fi
+        chown -R 10001:10001 /proj/secrets/run
+        chmod 0500 /proj/secrets/run
+        chmod 0400 /proj/secrets/run/* 2>/dev/null || true
+    volumes:
+      - .:/proj
+
+  archiver:
+    image: tapo-nas-archiver:1
+    build: .
+    container_name: tapo-nas-archiver
+    restart: unless-stopped
+    user: "10001:10001"
+    depends_on:
+      fixperms: {condition: service_completed_successfully}
+    environment:
+      TZ: Europe/Berlin                # your time zone; folder and file names use local time
+      TAPO_HOSTS: "192.168.1.50"       # IP of your hub (or camera); several devices separated by commas
+      DAYS_BACK: "89"                  # how many days back to look on the SD card per run
+      KEEP_DAYS: "90"                  # delete day folders older than this on the NAS (0 = never); DAYS_BACK stays below it
+      RUN_AT_HOUR: "4"                 # daily run, local time
+      METHOD: "playback"               # "download" is faster but aborts on the H200
+    volumes:
+      - ./app:/app:ro
+      - ./recordings:/recordings
+      - ./secrets/run:/run/secrets:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
