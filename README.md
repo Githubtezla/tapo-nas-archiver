@@ -1,8 +1,8 @@
 # tapo-nas-archiver
 
-Copy the recordings of your Tapo cameras and doorbells to your own NAS, including models that cannot save to a NAS at all.
+Copy the recordings of your Tapo cameras and doorbells to your own NAS or home server, including models that cannot save to a NAS at all. Runs anywhere Docker runs: Synology, QNAP, UGREEN, Unraid, TrueNAS, a Raspberry Pi or any Linux box.
 
-Tapo devices store their recordings on a microSD card or in the paid Tapo Care cloud. Saving to a NAS or NVR is only possible through RTSP/ONVIF, and battery-powered models like the **D230 doorbell** or the **H200 hub** do not offer RTSP at all. This project takes a different route: it downloads the recordings that are already on the microSD card, the same way the Tapo app plays them back, and stores them as MP4 files on your NAS. It runs as a small Docker container, talks to the device only inside your LAN and needs no cloud, no Home Assistant and no open ports.
+Tapo devices store their recordings on a microSD card or in the paid Tapo Care cloud. Saving to a NAS or NVR is only possible through RTSP/ONVIF, and battery-powered models like the **D230 doorbell** or the **H200 hub** do not offer RTSP at all. This project takes a different route: it downloads the recordings that are already on the microSD card, the same way the Tapo app plays them back, and stores them as MP4 files in a folder of your choice. It runs as a small Docker container, talks to the device only inside your LAN and needs no cloud, no Home Assistant and no open ports.
 
 It is built on [pytapo](https://github.com/JurajNyiri/pytapo), which does the actual work of talking to the device.
 
@@ -26,17 +26,23 @@ Other Tapo devices that can play back their SD card recordings in the Tapo app w
 
 ## Requirements
 
-- A NAS or any Linux machine with Docker and Docker Compose (tested on a UGREEN NAS with UGOS Pro).
-- The Tapo device in the same LAN as the NAS, with a microSD card and recording switched on in the Tapo app.
+- Any always-on machine with Docker and Docker Compose v2: a NAS, a home server, a Raspberry Pi or a Linux VM. Docker Desktop on Windows or macOS works too, but the machine has to stay on for the nightly run.
+- The Tapo device in the same LAN as that machine, with a microSD card and recording switched on in the Tapo app.
 - The IP address of the device (Tapo app, device settings, device info). Give it a fixed address in your router, otherwise the container cannot find it after a change.
 - The password of your Tapo account. Two-factor authentication on the account does not matter, because the login happens locally on the device.
 
-## Quick start
+This has been tested on an x86_64 NAS (UGREEN DXP2800 with UGOS Pro). The base image `python:3.13-slim-bookworm` is also available for ARM (`arm64`), so Raspberry Pi and ARM-based NAS models should work, but that is untested.
+
+## Quick start (command line)
+
+This is the generic way and works on every system with Docker. Run it in a shell on the NAS or server (SSH), in a folder where the recordings may grow to several GB, for example `/volume1/docker/tapo-nas-archiver` on Synology, UGREEN or QNAP, `/mnt/user/appdata/tapo-nas-archiver` on Unraid, or `~/tapo-nas-archiver` on a plain Linux machine.
 
 ```bash
 git clone https://github.com/Githubtezla/tapo-nas-archiver.git
 cd tapo-nas-archiver
 ```
+
+No git on the NAS? Download the ZIP from GitHub (Code, Download ZIP) and unpack it into that folder instead.
 
 1. Create the file `secrets/tapo_password` with one line: the password of your Tapo account.
 2. Open `docker-compose.yaml` and set `TAPO_HOSTS` to the IP of your hub or camera, and `TZ` to your time zone.
@@ -56,9 +62,28 @@ docker compose logs -f archiver
 
 The first run downloads everything that is on the card and can take many hours (see below). After that, each nightly run only fetches the new clips.
 
-### NAS web interfaces
+Want the videos somewhere else, for example in a shared folder you can browse from your PC? Change the left side of `./recordings:/recordings` in `docker-compose.yaml` to that folder. The container runs as uid 10001, so that folder must be writable for it, for example with `sudo chown -R 10001:10001 /path/to/folder`; the `fixperms` service only does this for `./recordings` inside the project.
 
-Some NAS web interfaces only show Docker projects that were created there. On UGREEN UGOS, a project started only with `docker compose up -d` does not appear in the Docker app. Copy the folder to the NAS, then create the project in the Docker app (Project, Create), pick the folder and choose "import this configuration". Synology Container Manager has a similar dialog (Project, Create, use an existing `docker-compose.yaml`); this has not been tested here. Building and testing on the command line before that is fine.
+## Running it on a NAS or server
+
+The project needs two things that every Docker setup provides: building a small image from the `Dockerfile`, and bind-mounting the project folder. How you start it depends on your system. Only UGREEN UGOS has been tested; the other rows are pointers to the usual tools on those systems, and menu names can differ between versions. The command line quick start works on all of them.
+
+| System | How to run it |
+| --- | --- |
+| Any Linux, Raspberry Pi, VM | Quick start above. Docker restarts the container after a reboot (`restart: unless-stopped`). |
+| UGREEN UGOS Pro (tested) | Put the folder under `/volume1/docker/`, build and test on the command line if you like, then create the project in the Docker app: Project, Create, pick the folder and choose "import this configuration". A project started only with `docker compose up -d` does not show up in the Docker app. |
+| Synology DSM 7.2+ | Container Manager, Project, Create, and point it at the folder that contains `docker-compose.yaml`. Or the quick start over SSH with `sudo`. |
+| QNAP QTS / QuTS hero | Container Station lets you create an application from a compose file. Use absolute paths there (for example `/share/Container/tapo-nas-archiver`), and build the image over SSH first if it does not build by itself. |
+| Unraid | The quick start in the terminal, or a compose plugin, with the folder under `/mnt/user/appdata/`. |
+| TrueNAS SCALE | Custom app from YAML with absolute host paths; build the image over SSH first (`docker compose build`). |
+| Portainer | A stack from this Git repository, or build the image on the host first and paste the compose file with absolute paths. |
+
+General rules for GUIs that do not take the compose file as it is:
+
+- Replace every `.` in the `volumes` with the absolute path of the project folder.
+- If the GUI cannot build images, run `docker compose build` once over SSH; the image is then available as `tapo-nas-archiver:1`.
+- Keep the `fixperms` service. Without it the container, which does not run as root, may not be able to read the password or write the recordings.
+- Commands in this README use `docker compose`. On systems where Docker needs root, put `sudo` in front.
 
 ## Output
 
